@@ -1,0 +1,79 @@
+library(tidyverse)
+library(nflfastR)
+library(ggthemes)
+library(showtext)
+library(ggrepel)
+
+## forcing a switch to the team_abbr found in nflverse data
+time_in_pocket$team_name[time_in_pocket$team_name == "BLT"] <- "BAL"
+time_in_pocket$team_name[time_in_pocket$team_name == "CLV"] <- "CLE"
+time_in_pocket$team_name[time_in_pocket$team_name == "ARZ"] <- "ARI"
+time_in_pocket$team_name[time_in_pocket$team_name == "HST"] <- "HOU"
+
+## keeping just information we want from pff data
+time_in_pocket <- time_in_pocket %>%
+  select(player_id, avg_time_to_throw)f
+
+## grabbing data from 2021 NFL season
+pbp <- nflfastR::load_pbp(2021)
+
+## getting information from pbp dat
+qb.data <- pbp %>%
+  filter(season_type == "REG", complete_pass == 1 | incomplete_pass == 1 | interception == 1, !is.na(down)) %>%
+  group_by(passer, passer_id, posteam) %>%
+  summarize(n_attempts = n(),
+            mean.ay = mean(air_yards, na.rm = T),
+            mean.cpoe = mean(cpoe, na.rm = T)) %>%
+  filter(n_attempts >= 100)
+
+## grabbing roster information to merge with time_in_pocket
+roster <- nflfastR::fast_scraper_roster(2021)
+
+## getting just the informatio needed from roster for the first merge
+roster <- roster %>%
+  select(gsis_id, pff_id)
+
+## merging qb.data with roster data to have pff_id
+qb.data <- qb.data %>%
+  left_join(roster, by = c("passer_id" = "gsis_id"))
+
+## now merging data from nflfastR with data from pff & dropping unneeded pff id
+qb.data <- qb.data %>%
+  left_join(time_in_pocket, by = c("pff_id" = "player_id")) %>%
+  select(-c(pff_id))
+
+## adding team colors and logos
+qb.data <- qb.data %>%
+  left_join(teams_colors_logos, by = c("posteam" = "team_abbr"))
+
+##installing google font for plotting
+font_add_google("Overpass")
+showtext_auto()
+
+## plotting
+ggplot(data = qb.data, aes(x = mean.ay, y = avg_time_to_throw)) +
+  nflplotR::geom_mean_lines(aes(v_var = mean.ay, h_var = avg_time_to_throw), 
+                            size = .8, linetype = "dashed", color = "#b36b6b") +
+  geom_smooth(se = FALSE, color = "#99b3ff", size = .8, alpha = 0.8) +
+  geom_point(color = qb.data$team_color, size = 4.5) +
+  geom_label_repel(aes(label = passer),
+                   size = 3, box.padding = 0.25, label.padding = 0.25, nudge_x = 0.08, family = "Overpass") +
+  theme_fivethirtyeight() +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 8)) +
+  theme(axis.text.x=element_text(size=11, colour="#000000", family = "Overpass")) +
+  theme(axis.text.y=element_text(size=11, colour="#000000", family = "Overpass")) +
+  theme(axis.title.y=element_text(size=11,colour="#000000", family = "Overpass", vjust=1.5)) +
+  theme(axis.title.x=element_text(size=11,colour="#000000", family = "Overpass", vjust=-.5)) +
+  theme(plot.title = element_text(size = 18, color = "#000000", family = "Overpass")) +
+  theme(plot.caption = element_text(family = "Overpass")) +
+  xlab("Mean Air Yards") +
+  ylab("Avg. Time To Throw (in seconds)") +
+  labs(title = "Mean Air Yards vs. Avg. Time To Throw",
+       caption = "@BradCongelio  |  2021 Season  |  Data: nflfastR & PFF") +
+  theme(aspect.ratio = 9 / 16)
+
+ 
+## saving the plot
+ggsave("airyard-ttt.png", dpi = 96)
+
